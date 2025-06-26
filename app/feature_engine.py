@@ -59,7 +59,7 @@ class FeatureEngine:
     
     def run_all(self):
         """
-        全ての特徴量生成を実行
+        全ての特徴量生成を実行（高速化版）
         
         Returns:
             pd.DataFrame: 特徴量が追加されたデータフレーム
@@ -70,32 +70,24 @@ class FeatureEngine:
             # 基本特徴量
             self._generate_basic_flags()
             
-            # DataFrameを最適化（断片化解除）
-            self.df = self.df.copy()
-            
-            # 移動平均特徴量を効率的に生成
+            # 移動平均特徴量（必要最小限のウィンドウサイズのみ）
             self._generate_moving_averages_optimized()
             
-            # DataFrameを最適化
-            self.df = self.df.copy()
-            
-            # ギャップ特徴量を効率的に生成
+            # ギャップ特徴量（高速版）
             self._generate_gap_features_optimized()
             
-            # DataFrameを最適化
-            self.df = self.df.copy()
-            
-            # 組み合わせ特徴量
+            # 組み合わせ特徴量（高速版）
             self._generate_combination_features()
             
-            # DataFrameを最適化
-            self.df = self.df.copy()
+            # セット球プロファイル特徴量（軽量版）
+            if 'セット球' in self.df.columns:
+                self._generate_set_ball_profiles()
             
-            # セット球プロファイル特徴量
-            self._generate_set_ball_profiles()
+            # 欠損値処理
+            self._handle_missing_values()
             
-            # 最終的な最適化
-            self.df = self.df.copy()
+            # メモリ最適化
+            self._optimize_memory_usage()
             
             logger.info(f"特徴量生成が完了しました。最終的な列数: {len(self.df.columns)}")
             return self.df
@@ -103,34 +95,60 @@ class FeatureEngine:
         except Exception as e:
             logger.error(f"特徴量生成中にエラーが発生しました: {e}")
             return None
+    
+    def _optimize_memory_usage(self):
+        """
+        メモリ使用量を最適化
+        """
+        # データ型の最適化
+        for col in self.df.columns:
+            if self.df[col].dtype == 'int64':
+                if self.df[col].min() >= 0 and self.df[col].max() <= 255:
+                    self.df[col] = self.df[col].astype('uint8')
+                elif self.df[col].min() >= -128 and self.df[col].max() <= 127:
+                    self.df[col] = self.df[col].astype('int8')
+                elif self.df[col].min() >= -32768 and self.df[col].max() <= 32767:
+                    self.df[col] = self.df[col].astype('int16')
+            elif self.df[col].dtype == 'float64':
+                self.df[col] = self.df[col].astype('float32')
+        
+        # DataFrame断片化の解除
+        self.df = self.df.copy()
 
     def _generate_basic_flags(self):
         """
-        基本的な出現フラグを生成
+        基本的な出現フラグを生成（高速化版）
         """
         logger.info("基本出現フラグを生成中...")
         
-        # 本数字の出現フラグを一括生成
-        main_flags_data = {}
-        for n in range(1, 44):
-            flags = np.zeros(len(self.df), dtype=int)
-            for i in range(1, 7):  # 本数字1〜6
-                col_name = f'本数字{i}'
-                if col_name in self.df.columns:
-                    flags |= (self.df[col_name] == n).astype(int)
-            main_flags_data[f'is_appear_{n}'] = flags
+        # 本数字列の取得
+        main_cols = [f'本数字{i}' for i in range(1, 7) if f'本数字{i}' in self.df.columns]
         
-        # ボーナス数字の出現フラグを一括生成
+        if main_cols:
+            # NumPy配列で高速処理
+            main_numbers = self.df[main_cols].values
+            
+            # 全ての数字の出現フラグを一度に計算
+            main_flags_data = {}
+            for n in range(1, 44):
+                # ベクトル化演算で高速化
+                main_flags_data[f'is_appear_{n}'] = (main_numbers == n).any(axis=1).astype(np.int8)
+        
+        # ボーナス数字の出現フラグを生成
         bonus_flags_data = {}
         if 'ボーナス数字' in self.df.columns:
+            bonus_numbers = self.df['ボーナス数字'].values
             for n in range(1, 44):
-                bonus_flags_data[f'is_bonus_appear_{n}'] = (self.df['ボーナス数字'] == n).astype(int)
+                bonus_flags_data[f'is_bonus_appear_{n}'] = (bonus_numbers == n).astype(np.int8)
         
-        # 一括でDataFrameに追加
-        main_flags_df = pd.DataFrame(main_flags_data, index=self.df.index)
-        bonus_flags_df = pd.DataFrame(bonus_flags_data, index=self.df.index)
+        # 一括でDataFrameに追加（メモリ効率向上）
+        if main_flags_data:
+            main_flags_df = pd.DataFrame(main_flags_data, index=self.df.index)
+            self.df = pd.concat([self.df, main_flags_df], axis=1)
         
-        self.df = pd.concat([self.df, main_flags_df, bonus_flags_df], axis=1)
+        if bonus_flags_data:
+            bonus_flags_df = pd.DataFrame(bonus_flags_data, index=self.df.index)
+            self.df = pd.concat([self.df, bonus_flags_df], axis=1)
     
     def _generate_moving_averages_optimized(self):
         """
@@ -138,28 +156,30 @@ class FeatureEngine:
         """
         logger.info("移動平均特徴量を生成中...")
         
+        # 全ての出現フラグ列を一括処理
+        appear_cols = [col for col in self.df.columns if col.startswith('is_appear_') or col.startswith('is_bonus_appear_')]
+        
+        if not appear_cols:
+            logger.warning("出現フラグ列が見つかりません。移動平均をスキップします。")
+            return
+        
+        # パフォーマンス向上のため、必要な移動平均のみ生成
+        windows = [5, 25, 75]
         ma_data = {}
         
-        for n in range(1, 44):
-            # 本数字
-            col = f'is_appear_{n}'
-            if col in self.df.columns:
-                series = self.df[col]
-                ma_data[f'ma_5_{n}'] = series.rolling(window=5, min_periods=1).mean().shift(1)
-                ma_data[f'ma_25_{n}'] = series.rolling(window=25, min_periods=1).mean().shift(1)
-                ma_data[f'ma_75_{n}'] = series.rolling(window=75, min_periods=1).mean().shift(1)
-
-            # ボーナス数字
-            bonus_col = f'is_bonus_appear_{n}'
-            if bonus_col in self.df.columns:
-                bonus_series = self.df[bonus_col]
-                ma_data[f'ma_bonus_5_{n}'] = bonus_series.rolling(window=5, min_periods=1).mean().shift(1)
-                ma_data[f'ma_bonus_25_{n}'] = bonus_series.rolling(window=25, min_periods=1).mean().shift(1)
-                ma_data[f'ma_bonus_75_{n}'] = bonus_series.rolling(window=75, min_periods=1).mean().shift(1)
+        for col in appear_cols:
+            series = self.df[col]
+            # 移動平均を一括計算
+            for window in windows:
+                if 'bonus' in col:
+                    ma_data[f'ma_bonus_{window}_{col.split("_")[-1]}'] = series.rolling(window=window, min_periods=1).mean().shift(1)
+                else:
+                    ma_data[f'ma_{window}_{col.split("_")[-1]}'] = series.rolling(window=window, min_periods=1).mean().shift(1)
         
         # 一括でDataFrameに追加
-        ma_df = pd.DataFrame(ma_data, index=self.df.index)
-        self.df = pd.concat([self.df, ma_df], axis=1)
+        if ma_data:
+            ma_df = pd.DataFrame(ma_data, index=self.df.index)
+            self.df = pd.concat([self.df, ma_df], axis=1)
 
     def _generate_gap_features_optimized(self):
         """
@@ -167,95 +187,121 @@ class FeatureEngine:
         """
         logger.info("ギャップ特徴量を生成中...")
         
+        # 出現フラグ列を一括取得
+        appear_cols = [col for col in self.df.columns if col.startswith('is_appear_') or col.startswith('is_bonus_appear_')]
+        
+        if not appear_cols:
+            logger.warning("出現フラグ列が見つかりません。ギャップ特徴量をスキップします。")
+            return
+        
         gap_data = {}
         
-        for n in range(1, 44):
-            # 本数字のギャップ
-            col = f'is_appear_{n}'
-            if col in self.df.columns:
-                gap_data[f'gap_{n}'] = self._calculate_gap_series(self.df[col])
-
-            # ボーナス数字のギャップ
-            bonus_col = f'is_bonus_appear_{n}'
-            if bonus_col in self.df.columns:
-                gap_data[f'gap_bonus_{n}'] = self._calculate_gap_series(self.df[bonus_col])
+        # NumPy配列で高速処理
+        appear_data = self.df[appear_cols].values
+        
+        for idx, col in enumerate(appear_cols):
+            series_data = appear_data[:, idx]
+            gaps = self._calculate_gap_series_fast(series_data)
+            
+            if 'bonus' in col:
+                gap_data[f'gap_bonus_{col.split("_")[-1]}'] = gaps
+            else:
+                gap_data[f'gap_{col.split("_")[-1]}'] = gaps
         
         # 一括でDataFrameに追加
-        gap_df = pd.DataFrame(gap_data, index=self.df.index)
-        self.df = pd.concat([self.df, gap_df], axis=1)
+        if gap_data:
+            gap_df = pd.DataFrame(gap_data, index=self.df.index)
+            self.df = pd.concat([self.df, gap_df], axis=1)
     
-    def _calculate_gap_series(self, series: pd.Series) -> pd.Series:
+    def _calculate_gap_series_fast(self, series_data: np.ndarray) -> pd.Series:
         """
-        ギャップ系列を計算
+        ギャップ系列を高速計算（NumPy版）
         
         Args:
-            series (pd.Series): 入力系列
+            series_data (np.ndarray): 入力系列
             
         Returns:
             pd.Series: ギャップ系列
         """
-        gaps = np.zeros(len(series), dtype=int)
+        gaps = np.zeros(len(series_data), dtype=np.int16)
         last_appear_index = -1
-        for i, appeared in enumerate(series):
-            if appeared == 1:
+        
+        for i in range(len(series_data)):
+            if series_data[i] == 1:
                 last_appear_index = i
                 gaps[i] = 0
             else:
                 gaps[i] = i - last_appear_index if last_appear_index != -1 else i + 1
         
-        return pd.Series(gaps).shift(1).fillna(0)
+        # 1行シフトしてデータリークを防止
+        gaps_shifted = np.roll(gaps, 1)
+        gaps_shifted[0] = 0
+        
+        return pd.Series(gaps_shifted, dtype=np.int16)
     
     def _generate_combination_features(self):
         """
-        組み合わせの構造的特徴量を生成
+        組み合わせの構造的特徴量を生成（高速化版）
         """
         logger.info("組み合わせ特徴量を生成中...")
         
         main_cols = [col for col in self.df.columns if '本数字' in col and col != '本数字合計']
         main_numbers_df = self.df[main_cols].copy()
 
+        # NumPy配列で高速処理
+        main_numbers = main_numbers_df.values
+        
         combo_features = {}
 
-        # ベクトル化による高速化
+        # ベクトル化による高速計算
         # 奇数と偶数の比率
-        odd_counts = main_numbers_df.apply(lambda row: sum(x % 2 == 1 for x in row if pd.notna(x)), axis=1)
-        combo_features['odd_count'] = odd_counts
-        combo_features['even_count'] = 6 - odd_counts
-        combo_features['odd_even_ratio'] = odd_counts / 6
+        odd_counts = np.sum(main_numbers % 2 == 1, axis=1)
+        combo_features['odd_count'] = odd_counts.astype(np.int8)
+        combo_features['even_count'] = (6 - odd_counts).astype(np.int8)
+        combo_features['odd_even_ratio'] = (odd_counts / 6).astype(np.float32)
 
         # 低い数字(1-22)と高い数字(23-43)の分布
-        low_counts = main_numbers_df.apply(lambda row: sum(x <= 22 for x in row if pd.notna(x)), axis=1)
-        combo_features['low_count'] = low_counts
-        combo_features['high_count'] = 6 - low_counts
-        combo_features['low_high_ratio'] = low_counts / 6
+        low_counts = np.sum(main_numbers <= 22, axis=1)
+        combo_features['low_count'] = low_counts.astype(np.int8)
+        combo_features['high_count'] = (6 - low_counts).astype(np.int8)
+        combo_features['low_high_ratio'] = (low_counts / 6).astype(np.float32)
 
-        # 連続数字のペア数
-        def count_consecutive_pairs(row):
-            nums = sorted([x for x in row if pd.notna(x)])
-            if len(nums) < 2:
-                return 0
-            return sum(1 for i in range(len(nums) - 1) if nums[i+1] - nums[i] == 1)
-        combo_features['consecutive_pairs'] = main_numbers_df.apply(count_consecutive_pairs, axis=1)
+        # 連続数字のペア数（ベクトル化版）
+        consecutive_pairs = np.zeros(len(main_numbers), dtype=np.int8)
+        for i in range(len(main_numbers)):
+            nums = np.sort(main_numbers[i][~np.isnan(main_numbers[i])])
+            if len(nums) >= 2:
+                consecutive_pairs[i] = np.sum(np.diff(nums) == 1)
+        combo_features['consecutive_pairs'] = consecutive_pairs
 
         # 連続する3つの数字（トリプレット）
-        def count_consecutive_triplets(row):
-            nums = sorted([x for x in row if pd.notna(x)])
-            if len(nums) < 3:
-                return 0
-            return sum(1 for i in range(len(nums) - 2) if nums[i+1] - nums[i] == 1 and nums[i+2] - nums[i+1] == 1)
-        combo_features['consecutive_triplets'] = main_numbers_df.apply(count_consecutive_triplets, axis=1)
+        consecutive_triplets = np.zeros(len(main_numbers), dtype=np.int8)
+        for i in range(len(main_numbers)):
+            nums = np.sort(main_numbers[i][~np.isnan(main_numbers[i])])
+            if len(nums) >= 3:
+                diffs = np.diff(nums)
+                consecutive_triplets[i] = np.sum((diffs[:-1] == 1) & (diffs[1:] == 1))
+        combo_features['consecutive_triplets'] = consecutive_triplets
 
         # 一の位の分布
-        combo_features['unique_ending_digits'] = main_numbers_df.apply(lambda row: len(set(int(x) % 10 for x in row if pd.notna(x))), axis=1)
+        unique_endings = np.zeros(len(main_numbers), dtype=np.int8)
+        for i in range(len(main_numbers)):
+            nums = main_numbers[i][~np.isnan(main_numbers[i])]
+            if len(nums) > 0:
+                endings = nums.astype(int) % 10
+                unique_endings[i] = len(np.unique(endings))
+        combo_features['unique_ending_digits'] = unique_endings
 
         # 数字の分散（ばらつき）
-        combo_features['numbers_std'] = main_numbers_df.apply(lambda row: np.std([x for x in row if pd.notna(x)]), axis=1)
+        combo_features['numbers_std'] = np.nanstd(main_numbers, axis=1).astype(np.float32)
 
         # 最大値と最小値の差
-        def calculate_range(row):
-            nums = [x for x in row if pd.notna(x)]
-            return max(nums) - min(nums) if nums else 0
-        combo_features['number_range'] = main_numbers_df.apply(calculate_range, axis=1)
+        number_ranges = np.zeros(len(main_numbers), dtype=np.int8)
+        for i in range(len(main_numbers)):
+            nums = main_numbers[i][~np.isnan(main_numbers[i])]
+            if len(nums) > 0:
+                number_ranges[i] = np.max(nums) - np.min(nums)
+        combo_features['number_range'] = number_ranges
 
         # 一括でDataFrameに追加
         combo_df = pd.DataFrame(combo_features, index=self.df.index)

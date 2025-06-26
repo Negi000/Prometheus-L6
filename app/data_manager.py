@@ -283,6 +283,77 @@ class DataManager:
         
         logger.info(f"戦略を保存しました: {strategy_name}")
     
+    def update_strategy(self, strategy_name: str, strategy_data: dict):
+        """
+        既存戦略を上書き更新（真の継続学習用）
+        
+        Args:
+            strategy_name (str): 更新する戦略名
+            strategy_data (dict): 更新する戦略データ
+        """
+        db_path = self.config['Paths']['database_path']
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # 既存の戦略IDとモデルパスを取得
+            cursor.execute('SELECT strategy_id, model_path FROM strategies WHERE strategy_name = ?', (strategy_name,))
+            existing = cursor.fetchone()
+            
+            if not existing:
+                logger.error(f"更新対象の戦略が見つかりません: {strategy_name}")
+                raise ValueError(f"戦略「{strategy_name}」が存在しません")
+            
+            strategy_id, existing_model_path = existing
+            
+            # 新しいモデルを既存のパスに保存（上書き）
+            model = strategy_data['model']
+            
+            try:
+                with open(existing_model_path, 'wb') as f:
+                    pickle.dump(model, f)
+                logger.info(f"モデルを上書き保存しました: {existing_model_path}")
+            except Exception as e:
+                logger.error(f"モデルの上書き保存に失敗しました: {e}")
+                raise
+            
+            # データベースの戦略情報を更新
+            backtest_log_blob = pickle.dumps(strategy_data.get('backtest_log', []))
+            parameters_json = json.dumps(strategy_data.get('parameters', {}))
+            
+            cursor.execute('''
+            UPDATE strategies SET
+                created_at = ?,
+                backtest_profit = ?,
+                backtest_hit_rate_3 = ?,
+                backtest_hit_rate_4 = ?,
+                backtest_hit_rate_5 = ?,
+                description = ?,
+                backtest_log = ?,
+                parameters = ?
+            WHERE strategy_name = ?
+            ''', (
+                strategy_data['created_at'].isoformat(),
+                strategy_data.get('backtest_profit'),
+                strategy_data.get('backtest_hit_rate_3'),
+                strategy_data.get('backtest_hit_rate_4'),
+                strategy_data.get('backtest_hit_rate_5'),
+                strategy_data.get('description', ""),
+                backtest_log_blob,
+                parameters_json,
+                strategy_name
+            ))
+            
+            conn.commit()
+            logger.info(f"戦略「{strategy_name}」を上書き更新しました（継続学習）")
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"戦略更新に失敗しました: {e}")
+            raise
+        finally:
+            conn.close()
+    
     def get_all_strategies(self):
         """
         全ての戦略を取得

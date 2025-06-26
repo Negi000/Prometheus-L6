@@ -19,85 +19,25 @@ logger = logging.getLogger(__name__)
 
 def _show_backtest_details(data_manager: DataManager, strategy_name: str):
     """
-    バックテストの詳細を表示
+    選択された戦略のバックテスト詳細を表示
     """
     try:
-        # 戦略情報の取得
-        df_strategies = data_manager.get_all_strategies()
-        strategy_info = df_strategies[df_strategies['strategy_name'] == strategy_name].iloc[0]
+        strategy_info = data_manager.get_strategy(strategy_name)
+        
+        if not strategy_info:
+            st.error(f"戦略「{strategy_name}」が見つかりません。")
+            return
         
         # バックテストログの取得
         backtest_log = strategy_info.get('backtest_log', [])
         
         if not backtest_log:
-            st.warning("バックテスト詳細ログが見つかりません。新しい戦略では詳細ログオプションを有効にしてください。")
+            st.warning("この戦略にはバックテスト詳細データがありません。")
             return
         
-        st.markdown("##### 📊 バックテスト実行結果")
-        
-        # サマリー表示
-        total_profit = sum(log['profit'] for log in backtest_log)
-        win_count = sum(1 for log in backtest_log if sum(log['hits_detail'].values()) > 0)
-        win_rate = win_count / len(backtest_log) if backtest_log else 0
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("総実行回数", len(backtest_log))
-        with col2:
-            st.metric("総損益", f"{total_profit:,}円")
-        with col3:
-            st.metric("平均損益", f"{total_profit/len(backtest_log):,.0f}円")
-        with col4:
-            st.metric("何等かの当選率", f"{win_rate:.1%}")
-        
-        # 詳細ログのサンプル表示
-        st.markdown("##### 📋 実行詳細ログ（最新10件）")
-        
-        # 最新10件のログをテーブル形式で表示
-        recent_logs = backtest_log[-10:]
-        
-        log_data = []
-        for log in recent_logs:
-            hits = log['hits_detail']
-            hit_summary = f"1等:{hits[1]} 2等:{hits[2]} 3等:{hits[3]} 4等:{hits[4]} 5等:{hits[5]}"
-            
-            # 実際の当選番号を安全に取得
-            actual_main = log.get('actual_numbers', {}).get('main', [])
-            predicted_sample = "N/A"
-            if log.get('predicted_portfolio'):
-                predicted_sample = str(log['predicted_portfolio'][0]) if log['predicted_portfolio'] else "N/A"
-            
-            log_data.append({
-                '回': f"第{log['draw_id']}回",
-                '損益': f"{log['profit']:,}円",
-                '賞金': f"{log['winnings']:,}円",
-                '購入費': f"{log['cost']:,}円",
-                '当選詳細': hit_summary,
-                '実際の当選番号': str(actual_main),
-                '予測サンプル': predicted_sample
-            })
-        
-        df_log = pd.DataFrame(log_data)
-        st.dataframe(df_log, use_container_width=True)
-        
-        # 損益推移グラフ
-        if len(backtest_log) > 1:
-            st.markdown("##### 📈 損益推移グラフ")
-            
-            # 累積損益の計算
-            cumulative_profit = []
-            running_total = 0
-            for log in backtest_log:
-                running_total += log['profit']
-                cumulative_profit.append(running_total)
-            
-            # グラフデータの準備
-            chart_data = pd.DataFrame({
-                '回': [f"第{log['draw_id']}回" for log in backtest_log],
-                '累積損益': cumulative_profit
-            })
-            
-            st.line_chart(chart_data.set_index('回'), use_container_width=True)
+        # 詳細結果表示の新機能を使用
+        from .detailed_results import show_detailed_backtest_results
+        show_detailed_backtest_results(backtest_log, strategy_name)
         
     except Exception as e:
         st.error(f"バックテスト詳細の表示中にエラーが発生しました: {e}")
@@ -456,7 +396,7 @@ def _show_new_strategy_training(data_manager: DataManager):
                         'backtest_hit_rate_3': hit_rates['hit_rate_3'],
                         'backtest_hit_rate_4': hit_rates['hit_rate_4'],
                         'backtest_hit_rate_5': hit_rates['hit_rate_5'],
-                        'backtest_log': performance_log if detailed_log else performance_log[-10:],  # 詳細ログまたはサンプル
+                        'backtest_log': performance_log,  # 全ての結果を保存
                         'parameters': {
                             'window_size': window_size,
                             'purchase_count': purchase_count,
@@ -486,57 +426,10 @@ def _show_new_strategy_training(data_manager: DataManager):
                     # 詳細分析結果の表示
                     if detailed_log and performance_log:
                         st.markdown("---")
-                        st.markdown("### 📈 詳細バックテスト分析")
                         
-                        # 最新の結果から詳細分析を表示
-                        recent_results = [log for log in performance_log if log.get('prediction_analysis')][-5:]
-                        
-                        if recent_results:
-                            st.markdown("#### 🎯 最新5回の予想vs実際 比較")
-                            
-                            for log in recent_results:
-                                analysis = log['prediction_analysis']
-                                draw_id = log['draw_id']
-                                
-                                with st.expander(f"第{draw_id}回 - 損益: {log['profit']:,}円"):
-                                    col1, col2 = st.columns(2)
-                                    
-                                    with col1:
-                                        st.markdown("**実際の当選番号:**")
-                                        actual = log['actual_numbers']
-                                        st.write(f"本数字: {actual['main']}")
-                                        st.write(f"ボーナス数字: {actual['bonus']}")
-                                        
-                                        st.markdown("**的中サマリー:**")
-                                        summary = analysis['summary']
-                                        st.write(f"本数字的中: {summary['main_numbers_predicted']}/6個")
-                                        st.write(f"ボーナス数字的中: {'○' if summary['bonus_predicted'] else '×'}")
-                                    
-                                    with col2:
-                                        st.markdown("**予想チケット成績:**")
-                                        ticket_analysis = analysis['ticket_analysis']
-                                        
-                                        prize_counts = {}
-                                        for ticket in ticket_analysis:
-                                            rank = ticket['prize_rank']
-                                            if rank:
-                                                prize_counts[rank] = prize_counts.get(rank, 0) + 1
-                                        
-                                        if prize_counts:
-                                            for rank in sorted(prize_counts.keys()):
-                                                st.write(f"{rank}等: {prize_counts[rank]}口")
-                                        else:
-                                            st.write("当選なし")
-                                        
-                                        # 最も成績の良いチケットを表示
-                                        best_ticket = min(ticket_analysis, key=lambda x: x['prize_rank'] if x['prize_rank'] else 10)
-                                        if best_ticket['prize_rank']:
-                                            st.markdown("**最高成績チケット:**")
-                                            st.write(f"番号: {best_ticket['numbers']}")
-                                            st.write(f"等級: {best_ticket['prize_rank']}等")
-                                            st.write(f"的中本数字: {best_ticket['matched_main_numbers']}")
-                        else:
-                            st.info("詳細分析データがありません。次回のバックテストから詳細情報が記録されます。")
+                        # 詳細結果表示の新機能を使用
+                        from .detailed_results import show_detailed_backtest_results
+                        show_detailed_backtest_results(performance_log, strategy_name)
                     
                     if detailed_log:
                         st.success("🔍 詳細ログが記録されました。戦略一覧タブから詳細を確認できます。")
@@ -609,9 +502,17 @@ def _show_continuous_learning(data_manager: DataManager):
             return
         
         st.info("💡 継続学習では、既存の戦略モデルを最新のデータで追加学習し、性能を向上させることができます。")
+        st.warning("🧠 **真の継続学習**: 戦略を上書き更新することで、同じ戦略を何度でも成長させることができます。")
         
         with st.form("continuous_learning_form"):
             st.markdown("##### 🎯 継続学習設定")
+            
+            # 継続学習モード選択
+            learning_mode = st.radio(
+                "📈 継続学習モード",
+                ["🔄 戦略を上書き更新（推奨：真の継続学習）", "🆕 新しい戦略として保存"],
+                help="上書き更新: 同じ戦略を継続的に成長させます / 新戦略保存: バージョン管理のため別名で保存"
+            )
             
             # 戦略選択
             strategy_names = df_strategies['strategy_name'].tolist()
@@ -640,17 +541,25 @@ def _show_continuous_learning(data_manager: DataManager):
                 # 元の戦略のパラメータを取得
                 original_params = strategy_info.get('parameters', {})
                 
+                # 戦略の学習範囲情報を横並びで表示
+                original_end = original_params.get('backtest_end', 1600)
+                original_start = original_params.get('backtest_start', 1000)
+                
+                info_col1, info_col2 = st.columns(2)
+                with info_col1:
+                    st.info(f"💡 **元の戦略**: 第{original_start}回〜第{original_end}回で学習済み")
+                with info_col2:
+                    st.success(f"🔄 **継続学習**: 任意の範囲で追加パターン学習が可能です")
+                
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    # 継続学習の開始回を設定（元の戦略の終了回の次から）
-                    original_end = original_params.get('backtest_end', 1600)
                     continue_start = st.number_input(
                         "継続学習開始回",
-                        min_value=original_end + 1,
+                        min_value=1000,
                         max_value=2008,
-                        value=original_end + 1,
-                        help=f"元の戦略は第{original_end}回まで学習済みです。それ以降のデータで追加学習を行います。"
+                        value=max(1800, original_end - 100),
+                        help="任意の範囲を選択可能。過去データでの再学習も含めてパターン強化を行います。"
                     )
                     
                     window_size = st.number_input(
@@ -662,11 +571,15 @@ def _show_continuous_learning(data_manager: DataManager):
                     )
                 
                 with col2:
+                    # 継続学習終了回を動的に設定
+                    min_end = continue_start + 10
+                    default_end = min(continue_start + 100, 2008)
+                    
                     continue_end = st.number_input(
                         "継続学習終了回",
-                        min_value=continue_start + 10,
+                        min_value=min_end,
                         max_value=2008,
-                        value=min(continue_start + 50, 2008),  # デフォルトを50回に短縮
+                        value=default_end,
                         help="継続学習の終了回号"
                     )
                     
@@ -694,39 +607,95 @@ def _show_continuous_learning(data_manager: DataManager):
                     help="継続学習の詳細ログを記録します。"
                 )
                 
+                # 学習率調整係数の詳細説明
+                st.markdown("**🎯 学習率調整係数** - 継続学習の慎重さを制御")
+                
+                # 推奨値の説明を表示
+                with st.expander("💡 学習率調整係数について詳しく"):
+                    st.markdown("""
+                    **学習率調整係数**は、継続学習時にモデルがどれだけ積極的に新しいパターンを学習するかを制御します。
+                    
+                    **📈 推奨値とその効果:**
+                    - **0.5-0.7 (慎重)**: 既存の知識を重視し、新しいデータによる変化を抑制
+                    - **0.8 (推奨)**: バランスの取れた学習。安定性と適応性の良いバランス
+                    - **0.9-1.0 (標準)**: 通常の学習率。新しいパターンを積極的に学習
+                    - **1.1-1.5 (積極的)**: より敏感に新しいトレンドに適応。不安定になるリスクあり
+                    - **1.6-2.0 (非推奨)**: 過学習のリスクが高い。既存の知識を破壊する可能性
+                    
+                    **💭 選択の指針:**
+                    - 既存戦略が安定して良好 → **0.6-0.8** (慎重な改善)
+                    - 性能改善を期待 → **0.8-1.0** (バランス型)
+                    - 最近のトレンド変化に対応 → **1.0-1.2** (適応型)
+                    """)
+                
                 learning_rate_factor = st.slider(
                     "学習率調整係数",
                     min_value=0.1,
                     max_value=2.0,
                     value=0.8,
                     step=0.1,
-                    help="継続学習時の学習率を調整します。0.8は元の学習率の80%を意味し、より慎重な学習を行います。"
+                    help="0.8推奨: 慎重で安定した継続学習。1.0=標準、0.6=超慎重、1.2=積極的"
                 )
                 
-                # 戦略名（継続学習版）
-                new_strategy_name = st.text_input(
-                    "継続学習後の戦略名",
-                    value=f"{selected_strategy}_v2",
-                    help="継続学習後の戦略に付ける新しい名前"
-                )
+                # 選択された値に応じた説明を表示
+                if learning_rate_factor < 0.7:
+                    st.info("🛡️ **慎重モード**: 既存の知識を重視し、安定性を優先します")
+                elif learning_rate_factor <= 1.0:
+                    st.success("⚖️ **バランスモード**: 安定性と適応性の良いバランスです")
+                elif learning_rate_factor <= 1.3:
+                    st.warning("🚀 **積極モード**: 新しいトレンドに敏感に反応します")
+                else:
+                    st.error("⚠️ **危険モード**: 過学習のリスクがあります。注意して使用してください")
+                
+                # 戦略名の設定（モードに応じて）
+                update_mode = learning_mode.startswith("🔄")
+                
+                if update_mode:
+                    st.info(f"✅ 戦略「{selected_strategy}」を上書き更新します（真の継続学習）")
+                    new_strategy_name = selected_strategy  # 同じ名前で上書き
+                    strategy_name_input = st.empty()  # 名前入力フィールドを非表示
+                else:
+                    new_strategy_name = st.text_input(
+                        "継続学習後の戦略名",
+                        value=f"{selected_strategy}_v2",
+                        help="継続学習後の戦略に付ける新しい名前"
+                    )
                 
                 description = st.text_area(
                     "継続学習の説明",
-                    placeholder=f"「{selected_strategy}」の継続学習版。第{continue_start}回〜第{continue_end}回のデータで追加学習。",
+                    placeholder=f"「{selected_strategy}」の継続学習。第{continue_start}回〜第{continue_end}回のデータで追加学習。",
                     help="継続学習の内容や改善点を記述"
                 )
                 
                 # 継続学習実行ボタン
-                submitted = st.form_submit_button("🔄 継続学習を開始", type="primary")
+                if update_mode:
+                    submitted = st.form_submit_button("🔄 戦略を継続成長させる", type="primary")
+                else:
+                    submitted = st.form_submit_button("🆕 新しい戦略として学習", type="primary")
                 
                 if submitted:
-                    # パラメータ検証
-                    if continue_start >= continue_end:
-                        st.error("継続学習開始回は終了回より小さい値を設定してください。")
-                        return
+                    # 元の戦略の終了回を取得
+                    original_end = original_params.get('backtest_end', 1600)
                     
+                    # シンプルなパラメータ検証
+                    validation_errors = []
+                    
+                    # 基本的な順序チェック
+                    if continue_start >= continue_end:
+                        validation_errors.append("継続学習開始回は終了回より小さい値を設定してください。")
+                    
+                    # 学習ウィンドウサイズのチェック
                     if continue_start <= window_size:
-                        st.error(f"継続学習開始回({int(continue_start)})は、学習ウィンドウサイズ({int(window_size)})より大きい必要があります。")
+                        validation_errors.append(f"継続学習開始回({int(continue_start)})は、学習ウィンドウサイズ({int(window_size)})より大きい必要があります。")
+                    
+                    # 戦略名の重複チェック（新戦略保存の場合のみ）
+                    if not update_mode and new_strategy_name in strategy_names:
+                        validation_errors.append(f"戦略名「{new_strategy_name}」は既に存在します。別の名前を選択してください。")
+                    
+                    # エラーがある場合は表示して終了
+                    if validation_errors:
+                        for error in validation_errors:
+                            st.error(error)
                         return
                     
                     with st.spinner("継続学習を実行中..."):
@@ -797,6 +766,7 @@ def _show_continuous_learning(data_manager: DataManager):
                                 updated_model, performance_log = result
                                 detailed_result = None
                             
+
                             if not performance_log:
                                 st.error("継続学習の結果が空です。パラメータを確認してください。")
                                 return
@@ -826,7 +796,7 @@ def _show_continuous_learning(data_manager: DataManager):
                                 'backtest_hit_rate_3': hit_rates['hit_rate_3'],
                                 'backtest_hit_rate_4': hit_rates['hit_rate_4'],
                                 'backtest_hit_rate_5': hit_rates['hit_rate_5'],
-                                'backtest_log': performance_log if detailed_log else performance_log[-10:],
+                                'backtest_log': performance_log,  # 全ての結果を保存
                                 'parameters': {
                                     'window_size': window_size,
                                     'purchase_count': purchase_count,
@@ -840,11 +810,16 @@ def _show_continuous_learning(data_manager: DataManager):
                                 }
                             }
                             
-                            # データベースに保存
-                            data_manager.save_strategy(strategy_data)
-                            
-                            # 結果表示
-                            st.success(f"✅ 継続学習が完了しました！戦略「{new_strategy_name}」として保存されました。")
+                            # データベースに保存（モードに応じて）
+                            if update_mode:
+                                # 戦略を上書き更新（真の継続学習）
+                                data_manager.update_strategy(new_strategy_name, strategy_data)
+                                st.success(f"🔄 戦略「{new_strategy_name}」を継続成長させました！")
+                                st.info("💡 この戦略は今後も継続的に学習を重ねることができます。")
+                            else:
+                                # 新しい戦略として保存
+                                data_manager.save_strategy(strategy_data)
+                                st.success(f"🆕 継続学習が完了しました！戦略「{new_strategy_name}」として保存されました。")
                             
                             # 改善度を表示
                             col1, col2, col3 = st.columns(3)
@@ -877,6 +852,11 @@ def _show_continuous_learning(data_manager: DataManager):
 
                             if detailed_log:
                                 st.success("🔍 詳細ログが記録されました。戦略一覧タブから詳細を確認できます。")
+                                
+                                # 継続学習の詳細結果も表示
+                                st.markdown("---")
+                                from .detailed_results import show_detailed_backtest_results
+                                show_detailed_backtest_results(performance_log, new_strategy_name)
                             
                         except Exception as e:
                             st.error(f"継続学習中にエラーが発生しました: {e}")
