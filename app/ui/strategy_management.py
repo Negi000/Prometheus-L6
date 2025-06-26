@@ -22,17 +22,43 @@ def _show_backtest_details(data_manager: DataManager, strategy_name: str):
     選択された戦略のバックテスト詳細を表示
     """
     try:
+        # まず戦略名で検索を試行
         strategy_info = data_manager.get_strategy(strategy_name)
         
         if not strategy_info:
-            st.error(f"戦略「{strategy_name}」が見つかりません。")
-            return
+            # 戦略名で見つからない場合、戦略一覧から詳細情報を取得を試行
+            st.warning(f"戦略「{strategy_name}」のデータベース情報が見つかりません。戦略一覧から情報を取得しています...")
+            
+            df_strategies = data_manager.get_all_strategies()
+            strategy_row = df_strategies[df_strategies['strategy_name'] == strategy_name]
+            
+            if strategy_row.empty:
+                st.error(f"戦略「{strategy_name}」が見つかりません。戦略が削除されているか、名前に誤りがある可能性があります。")
+                return
+            
+            # DataFrameの行を辞書に変換
+            strategy_info = strategy_row.iloc[0].to_dict()
         
         # バックテストログの取得
         backtest_log = strategy_info.get('backtest_log', [])
         
+        # ログの型チェック
+        if not isinstance(backtest_log, list):
+            st.warning("バックテストログの形式が正しくありません。")
+            backtest_log = []
+        
         if not backtest_log:
             st.warning("この戦略にはバックテスト詳細データがありません。")
+            
+            # 戦略情報だけでも表示
+            st.markdown("### 📊 戦略情報")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("モデルタイプ", strategy_info.get('model_type', 'Unknown'))
+                st.metric("平均損益", f"{strategy_info.get('backtest_profit', 0):.0f}円")
+            with col2:
+                st.metric("作成日時", strategy_info.get('created_at', 'Unknown'))
+                st.metric("4等以上的中率", f"{strategy_info.get('backtest_hit_rate_4', 0):.1%}")
             return
         
         # 詳細結果表示の新機能を使用
@@ -41,7 +67,7 @@ def _show_backtest_details(data_manager: DataManager, strategy_name: str):
         
     except Exception as e:
         st.error(f"バックテスト詳細の表示中にエラーが発生しました: {e}")
-        logger.error(f"Backtest details error: {e}")
+        logger.error(f"Backtest details error: {e}", exc_info=True)
 
 def show_strategy_management(data_manager: DataManager):
     """
@@ -775,9 +801,29 @@ def _show_continuous_learning(data_manager: DataManager):
                             progress_bar.empty()
                             progress_text.empty()
                             
-                            # 結果の集計
-                            total_profit = sum(log['profit'] for log in performance_log)
-                            avg_profit = total_profit / len(performance_log)
+                            # 結果の集計（型安全なキーアクセス）
+                            def safe_get_profit(log):
+                                if isinstance(log, dict):
+                                    return log.get('profit', 0)
+                                elif isinstance(log, (list, tuple)) and len(log) > 1:
+                                    return log[1] if len(log) > 1 else 0
+                                return 0
+                            
+                            def has_profit(log):
+                                if isinstance(log, dict):
+                                    return 'profit' in log
+                                elif isinstance(log, (list, tuple)):
+                                    return len(log) > 1
+                                return False
+                            
+                            total_profit = sum(safe_get_profit(log) for log in performance_log if has_profit(log))
+                            valid_logs = [log for log in performance_log if has_profit(log)]
+                            
+                            if not valid_logs:
+                                st.error("有効な継続学習結果が見つかりません。ログエントリにprofitデータが存在しません。")
+                                return
+                            
+                            avg_profit = total_profit / len(valid_logs)
                             
                             hit_rates = backtester._calculate_hit_rates(performance_log)
                             

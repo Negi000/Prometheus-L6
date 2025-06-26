@@ -276,6 +276,22 @@ class Backtester:
                 
             except Exception as e:
                 logger.error(f"第{draw_id}回のバックテスト中にエラーが発生: {e}", exc_info=True)
+                
+                # エラー時でも基本的なログエントリを追加（データの整合性保持）
+                error_log_entry = {
+                    'draw_id': draw_id,
+                    'profit': 0,
+                    'winnings': 0,
+                    'cost': purchase_count * 200,
+                    'hits_detail': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+                    'portfolio_size': 0,
+                    'actual_numbers': {},
+                    'predicted_portfolio': [],
+                    'prediction_analysis': {},
+                    'model_accuracy': 0.0,
+                    'error': str(e)
+                }
+                performance_log.append(error_log_entry)
                 continue
         
         final_model = model # ループの最後のモデルを最終モデルとする
@@ -436,7 +452,7 @@ class Backtester:
                 
                 # 予測数字を生成
                 predicted_combinations = self._generate_numbers_from_probabilities(
-                    corrected_probabilities, min(purchase_count, 5)  # 最大5組合せに制限
+                    corrected_probabilities, purchase_count  # 指定された購入口数で生成
                 )
                 
                 if len(predicted_combinations) == 0:
@@ -464,13 +480,30 @@ class Backtester:
                     # 的中数計算
                     hit_count = len(set(predicted_numbers) & set(actual_numbers))
                     
-                    # パフォーマンスログに記録
+                    # ボーナス数字取得
+                    bonus_number = None
+                    if 'ボーナス' in current_data.columns:
+                        bonus_number = int(current_data.iloc[0]['ボーナス'])
+                    
+                    # より詳細な的中分析（既存メソッドを使用）
+                    winnings, hits_detail = self._calculate_winnings(
+                        [predicted_numbers], actual_numbers, bonus_number
+                    )
+                    cost = 200  # 1口200円
+                    profit = winnings - cost
+                    
+                    # パフォーマンスログに記録（標準形式に統一）
                     result_log = {
-                        'draw': current_draw,
-                        'predicted_numbers': predicted_numbers,
-                        'actual_numbers': actual_numbers,
-                        'hit_count': hit_count,
-                        'profit': self._calculate_profit(hit_count, purchase_count),
+                        'draw_id': current_draw,
+                        'predicted_portfolio': [predicted_numbers],
+                        'actual_numbers': {
+                            'main': actual_numbers,
+                            'bonus': bonus_number
+                        },
+                        'hits_detail': hits_detail,
+                        'cost': cost,
+                        'winnings': winnings,
+                        'profit': profit,
                         'pattern_corrections': self.pattern_correction.get_correction_summary()
                     }
                     
@@ -484,10 +517,22 @@ class Backtester:
                     
                     performance_log.append(result_log)
                     
-                    logger.debug(f"第{current_draw}回: 予測={predicted_numbers}, 実際={actual_numbers}, 的中={hit_count}")
+                    logger.debug(f"第{current_draw}回: 予測={predicted_numbers}, 実際={actual_numbers}, 的中={hit_count}, 損益={profit}円")
                 
             except Exception as e:
                 logger.error(f"第{current_draw}回の予測・分析でエラー: {e}")
+                # エラー時でも必須キーを含むログエントリを追加
+                error_log = {
+                    'draw_id': current_draw,
+                    'predicted_portfolio': [],
+                    'actual_numbers': {'main': [], 'bonus': None},
+                    'hits_detail': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+                    'cost': 0,
+                    'winnings': 0,
+                    'profit': 0,
+                    'error': str(e)
+                }
+                performance_log.append(error_log)
                 continue
         
         # 学習済みモデルにパターン補正を保存
@@ -625,6 +670,22 @@ class Backtester:
                 
             except Exception as e:
                 logger.error(f"継続学習 第{draw_id}回でエラーが発生: {e}", exc_info=True)
+                
+                # エラー時でも基本的なログエントリを追加（データの整合性保持）
+                error_log_entry = {
+                    'draw_id': draw_id,
+                    'profit': 0,
+                    'winnings': 0,
+                    'cost': purchase_count * 200,
+                    'hits_detail': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+                    'portfolio_size': 0,
+                    'actual_numbers': {},
+                    'predicted_portfolio': [],
+                    'model_accuracy': 0.0,
+                    'is_continuous_learning': True,
+                    'error': str(e)
+                }
+                performance_log.append(error_log_entry)
                 continue
         
         if performance_log:
@@ -866,7 +927,7 @@ class Backtester:
         probabilities = probabilities / np.sum(probabilities)
         
         try:
-            for _ in range(min(purchase_count, 10)):  # 最大10組合せに制限
+            for _ in range(purchase_count):  # 指定された購入口数で生成
                 # 確率に基づいて6個の数字を選択
                 selected_numbers = np.random.choice(
                     range(1, 44), 
@@ -878,7 +939,7 @@ class Backtester:
         except Exception as e:
             logger.error(f"数字組み合わせ生成エラー: {e}")
             # フォールバック: ランダム選択
-            for _ in range(min(purchase_count, 5)):
+            for _ in range(purchase_count):
                 selected_numbers = np.random.choice(range(1, 44), size=6, replace=False)
                 combinations.append(sorted(selected_numbers.tolist()))
         
@@ -925,11 +986,25 @@ class Backtester:
                         continue
             
             bonus_number = None
-            if 'ボーナス数字' in row.index and pd.notna(row['ボーナス数字']):
-                try:
-                    bonus_number = int(row['ボーナス数字'])
-                except (ValueError, TypeError):
-                    bonus_number = None # 変換できない場合はNoneのまま
+            # ボーナス数字の列名をチェック（複数のパターンに対応）
+            bonus_cols = ['ボーナス数字', 'ボーナス', 'bonus']
+            for bonus_col in bonus_cols:
+                if bonus_col in row.index and pd.notna(row[bonus_col]):
+                    try:
+                        bonus_number = int(row[bonus_col])
+                        logger.debug(f"ボーナス数字取得成功: {bonus_col}={bonus_number}")
+                        break
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"ボーナス数字変換失敗: {bonus_col}={row[bonus_col]}, エラー: {e}")
+                        continue
+                else:
+                    if bonus_col in row.index:
+                        logger.debug(f"ボーナス列 {bonus_col} は存在するがNA: {row[bonus_col]}")
+                    else:
+                        logger.debug(f"ボーナス列 {bonus_col} は存在しません")
+            
+            if bonus_number is None:
+                logger.warning(f"ボーナス数字が取得できませんでした。利用可能な列: {list(row.index)}")
             
             return {'main': sorted(main_numbers), 'bonus': bonus_number}
         
@@ -975,7 +1050,7 @@ class Backtester:
 
     def _calculate_hit_rates(self, performance_log: List[Dict]) -> Dict[str, float]:
         """
-        バックテスト結果から的中率を計算（安全なキーアクセス）
+        バックテスト結果から的中率を計算（型安全なキーアクセス）
         """
         if not performance_log:
             return {'hit_rate_3': 0, 'hit_rate_4': 0, 'hit_rate_5': 0}
@@ -988,7 +1063,14 @@ class Backtester:
         hits_5_or_better = 0
         
         for log in performance_log:
-            hits_detail = log.get('hits_detail', {1: 0, 2: 0, 3: 0, 4: 0, 5: 0})
+            # 型安全なhits_detail取得
+            if isinstance(log, dict):
+                hits_detail = log.get('hits_detail', {1: 0, 2: 0, 3: 0, 4: 0, 5: 0})
+            elif isinstance(log, (list, tuple)) and len(log) > 4:
+                # リスト型の場合、5番目の要素がhits_detail
+                hits_detail = log[4] if isinstance(log[4], dict) else {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+            else:
+                hits_detail = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
             
             # 3等以上（1等、2等、3等）
             if hits_detail.get(1, 0) > 0 or hits_detail.get(2, 0) > 0 or hits_detail.get(3, 0) > 0:

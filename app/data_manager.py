@@ -410,12 +410,12 @@ class DataManager:
             
         return df
     
-    def get_strategy(self, strategy_id):
+    def get_strategy(self, strategy_identifier):
         """
-        特定の戦略を取得
+        特定の戦略を取得 (IDまたは名前で検索)
         
         Args:
-            strategy_id (str): 戦略ID
+            strategy_identifier (str): 戦略IDまたは戦略名
             
         Returns:
             dict: 戦略情報
@@ -429,8 +429,15 @@ class DataManager:
         
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM strategies WHERE strategy_id = ?", (strategy_id,))
+            # まずIDで検索を試行
+            cursor.execute("SELECT * FROM strategies WHERE strategy_id = ?", (strategy_identifier,))
             result = cursor.fetchone()
+            
+            # IDで見つからない場合は戦略名で検索
+            if not result:
+                cursor.execute("SELECT * FROM strategies WHERE strategy_name = ?", (strategy_identifier,))
+                result = cursor.fetchone()
+                
         finally:
             conn.close()
         
