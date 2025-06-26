@@ -55,7 +55,8 @@ class Backtester:
     
     def run(self, df_features: pd.DataFrame, start_draw: int, end_draw: int, 
             window_size: int = 100, purchase_count: int = 20, 
-            detailed_log: bool = False, enable_feedback: bool = False) -> Tuple[Any, List[Dict]]:
+            detailed_log: bool = False, enable_feedback: bool = False, 
+            progress_callback=None) -> Tuple[Any, List[Dict]]:
         """
         バックテストの実行（自己補正フィードバックループ機能付き）
         
@@ -67,6 +68,7 @@ class Backtester:
             purchase_count (int): 購入口数
             detailed_log (bool): 詳細ログを記録するかどうか
             enable_feedback (bool): 予測誤差を学習する自己補正機能を有効にするか
+            progress_callback (callable): 進行状況を報告するコールバック関数
             
         Returns:
             Tuple[Any, List[Dict]]: (最終学習済みモデル, パフォーマンスログ)
@@ -117,7 +119,17 @@ class Backtester:
         bonus_col = 'ボーナス数字' if 'ボーナス数字' in df_run.columns else None
         
         # バックテストのメインループ
+        total_draws = end_draw - start_draw + 1
+        current_draw_index = 0
+        
         for draw_id in range(start_draw, end_draw + 1):
+            current_draw_index += 1
+            
+            # 進行状況の報告
+            if progress_callback:
+                progress = current_draw_index / total_draws
+                progress_callback(progress, draw_id, total_draws)
+            
             try:
                 if draw_id - window_size < min_available_draw:
                     logger.warning(f"第{draw_id}回のテストをスキップ: 学習に必要なデータが不足しています。")
@@ -198,6 +210,9 @@ class Backtester:
                 cost = purchase_count * 200
                 profit = winnings - cost
                 
+                # 詳細分析：予想vs実際の比較
+                prediction_analysis = self._analyze_predictions(predicted_portfolio, actual_numbers) if detailed_log else None
+                
                 log_entry = {
                     'draw_id': draw_id,
                     'profit': profit,
@@ -206,7 +221,8 @@ class Backtester:
                     'hits_detail': hits_detail,
                     'portfolio_size': len(predicted_portfolio),
                     'actual_numbers': actual_numbers,
-                    'predicted_portfolio': predicted_portfolio[:5] if detailed_log else None,
+                    'predicted_portfolio': predicted_portfolio if detailed_log else predicted_portfolio[:5],
+                    'prediction_analysis': prediction_analysis,
                     'model_accuracy': self._calculate_prediction_accuracy(
                         predicted_probabilities, actual_numbers, len(target_cols)
                     )
@@ -235,7 +251,8 @@ class Backtester:
     def run_continuous_learning(self, df_features: pd.DataFrame, base_model: Any,
                                start_draw: int, end_draw: int, window_size: int = 100, 
                                purchase_count: int = 20, detailed_log: bool = False, 
-                               enable_feedback: bool = False, learning_rate_factor: float = 0.8) -> Tuple[Any, List[Dict]]:
+                               enable_feedback: bool = False, learning_rate_factor: float = 0.8,
+                               progress_callback=None) -> Tuple[Any, List[Dict]]:
         """
         継続学習の実行（既存モデルを基に追加学習）
         
@@ -293,7 +310,17 @@ class Backtester:
         logger.info(f"継続学習: 使用特徴量数={len(feature_cols)}, ターゲット列数={len(target_cols)}")
         
         # 継続学習のメインループ
+        total_draws = end_draw - start_draw + 1
+        current_draw_index = 0
+        
         for draw_id in range(start_draw, end_draw + 1):
+            current_draw_index += 1
+            
+            # 進行状況の報告
+            if progress_callback:
+                progress = current_draw_index / total_draws
+                progress_callback(progress, draw_id, total_draws)
+            
             try:
                 if draw_id - window_size < min_available_draw:
                     logger.warning(f"第{draw_id}回のテストをスキップ: 学習に必要なデータが不足しています。")
@@ -612,6 +639,89 @@ class Backtester:
             'hit_rate_5': hits_5_or_better / total_draws
         }
 
+    def _analyze_predictions(self, predicted_portfolio: List[List[int]], 
+                           actual_numbers: Dict[str, any]) -> Dict:
+        """
+        予想と実際の結果を詳細分析
+        """
+        analysis = {
+            'total_tickets': len(predicted_portfolio),
+            'actual_main': actual_numbers.get('main', []),
+            'actual_bonus': actual_numbers.get('bonus'),
+            'ticket_analysis': [],
+            'number_hit_analysis': {},
+            'summary': {}
+        }
+        
+        actual_main_set = set(actual_numbers.get('main', []))
+        actual_bonus = actual_numbers.get('bonus')
+        
+        # 各予想番号の出現回数と的中回数を追跡
+        predicted_numbers = {}
+        for ticket in predicted_portfolio:
+            for num in ticket:
+                predicted_numbers[num] = predicted_numbers.get(num, 0) + 1
+        
+        # 数字別の的中分析
+        for num in range(1, 44):
+            if num in predicted_numbers:
+                is_main_hit = num in actual_main_set
+                is_bonus_hit = num == actual_bonus
+                analysis['number_hit_analysis'][num] = {
+                    'predicted_count': predicted_numbers[num],
+                    'is_main_hit': is_main_hit,
+                    'is_bonus_hit': is_bonus_hit,
+                    'hit_type': 'main' if is_main_hit else ('bonus' if is_bonus_hit else 'miss')
+                }
+        
+        # 各チケットの分析
+        for i, ticket in enumerate(predicted_portfolio):
+            ticket_set = set(ticket)
+            main_matches = len(ticket_set.intersection(actual_main_set))
+            bonus_match = 1 if actual_bonus and actual_bonus in ticket_set else 0
+            
+            # 等級判定
+            prize_rank = None
+            if main_matches == 6:
+                prize_rank = 1
+            elif main_matches == 5 and bonus_match == 1:
+                prize_rank = 2
+            elif main_matches == 5:
+                prize_rank = 3
+            elif main_matches == 4:
+                prize_rank = 4
+            elif main_matches == 3:
+                prize_rank = 5
+            
+            analysis['ticket_analysis'].append({
+                'ticket_id': i + 1,
+                'numbers': ticket,
+                'main_matches': main_matches,
+                'bonus_match': bonus_match,
+                'prize_rank': prize_rank,
+                'matched_main_numbers': list(ticket_set.intersection(actual_main_set)),
+                'matched_bonus': actual_bonus if bonus_match else None
+            })
+        
+        # サマリー統計
+        hit_counts = {'main': {}, 'bonus': 0}
+        for num in actual_main_set:
+            if num in predicted_numbers:
+                hit_counts['main'][num] = predicted_numbers[num]
+        
+        if actual_bonus and actual_bonus in predicted_numbers:
+            hit_counts['bonus'] = predicted_numbers[actual_bonus]
+        
+        analysis['summary'] = {
+            'main_numbers_predicted': len([n for n in actual_main_set if n in predicted_numbers]),
+            'bonus_predicted': actual_bonus in predicted_numbers if actual_bonus else False,
+            'total_main_predictions': sum(hit_counts['main'].values()),
+            'total_bonus_predictions': hit_counts['bonus'],
+            'hit_counts': hit_counts
+        }
+        
+        return analysis
+
     def _calculate_prediction_accuracy(self, predicted_probs: np.ndarray, 
                                        actual_numbers: Dict, num_targets: int) -> float:
         """
@@ -715,10 +825,16 @@ class Backtester:
                     if hasattr(estimator, 'learning_rate'):
                         estimator.learning_rate *= learning_rate_factor
                     elif hasattr(estimator, 'estimators_'):
-                        # VotingRegressorの場合
-                        for name, sub_estimator in estimator.estimators_:
-                            if hasattr(sub_estimator, 'learning_rate'):
-                                sub_estimator.learning_rate *= learning_rate_factor
+                        # VotingRegressorの場合 - named_estimators_を使用
+                        if hasattr(estimator, 'named_estimators_'):
+                            for name, sub_estimator in estimator.named_estimators_.items():
+                                if hasattr(sub_estimator, 'learning_rate'):
+                                    sub_estimator.learning_rate *= learning_rate_factor
+                        else:
+                            # estimators_を直接使用する場合
+                            for sub_estimator in estimator.estimators_:
+                                if hasattr(sub_estimator, 'learning_rate'):
+                                    sub_estimator.learning_rate *= learning_rate_factor
             elif hasattr(model, 'learning_rate'):
                 # 直接learning_rateを持つモデル
                 model.learning_rate *= learning_rate_factor
@@ -726,6 +842,8 @@ class Backtester:
             logger.info(f"学習率を {learning_rate_factor} 倍に調整しました。")
         except Exception as e:
             logger.warning(f"学習率の調整に失敗しました: {e}")
+            # エラーが発生した場合でも継続できるようにデフォルト値を設定
+            logger.info("学習率調整をスキップして標準設定で継続します。")
 
     def _continue_training(self, model: Any, X_train: pd.DataFrame, Y_train: pd.DataFrame):
         """

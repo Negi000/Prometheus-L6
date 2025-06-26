@@ -308,7 +308,7 @@ def _show_new_strategy_training(data_manager: DataManager):
             backtest_start = st.number_input(
                 "バックテスト開始回",
                 min_value=1,
-                max_value=2000,
+                max_value=2008,
                 value=1200,
                 help="バックテスト開始の回号"
             )
@@ -333,7 +333,7 @@ def _show_new_strategy_training(data_manager: DataManager):
             backtest_end = st.number_input(
                 "バックテスト終了回",
                 min_value=1,
-                max_value=2000,
+                max_value=2008,
                 value=1600,
                 help="バックテスト終了の回号"
             )
@@ -401,6 +401,14 @@ def _show_new_strategy_training(data_manager: DataManager):
                     
                     st.info(f"バックテストを実行中... (第{backtest_start}回〜第{backtest_end}回)")
                     
+                    # 進行状況表示用のプレースホルダー
+                    progress_bar = st.progress(0)
+                    progress_text = st.empty()
+                    
+                    def update_progress(progress, current_draw, total_draws):
+                        progress_bar.progress(progress)
+                        progress_text.text(f"バックテスト進行状況: 第{current_draw}回 ({progress:.1%} 完了)")
+                    
                     # バックテスター初期化
                     backtester = Backtester(model_type=model_type)
                     
@@ -412,7 +420,8 @@ def _show_new_strategy_training(data_manager: DataManager):
                         window_size=int(window_size),
                         purchase_count=int(purchase_count),
                         detailed_log=detailed_log,
-                        enable_feedback=enable_feedback # フィードバックオプションを渡す
+                        enable_feedback=enable_feedback, # フィードバックオプションを渡す
+                        progress_callback=update_progress
                     )
                     
                     # 返り値の数に応じて処理
@@ -425,6 +434,10 @@ def _show_new_strategy_training(data_manager: DataManager):
                     if not performance_log:
                         st.error("バックテスト結果が空です。パラメータを確認してください。")
                         return
+                    
+                    # プログレスバーとテキストをクリア
+                    progress_bar.empty()
+                    progress_text.empty()
                     
                     # 結果の集計
                     total_profit = sum(log['profit'] for log in performance_log)
@@ -469,6 +482,61 @@ def _show_new_strategy_training(data_manager: DataManager):
                         st.metric("3等以上的中率", f"{hit_rates['hit_rate_3']:.1%}")
                     
                     st.info(f"📊 バックテスト実行: {len(performance_log)}回")
+                    
+                    # 詳細分析結果の表示
+                    if detailed_log and performance_log:
+                        st.markdown("---")
+                        st.markdown("### 📈 詳細バックテスト分析")
+                        
+                        # 最新の結果から詳細分析を表示
+                        recent_results = [log for log in performance_log if log.get('prediction_analysis')][-5:]
+                        
+                        if recent_results:
+                            st.markdown("#### 🎯 最新5回の予想vs実際 比較")
+                            
+                            for log in recent_results:
+                                analysis = log['prediction_analysis']
+                                draw_id = log['draw_id']
+                                
+                                with st.expander(f"第{draw_id}回 - 損益: {log['profit']:,}円"):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.markdown("**実際の当選番号:**")
+                                        actual = log['actual_numbers']
+                                        st.write(f"本数字: {actual['main']}")
+                                        st.write(f"ボーナス数字: {actual['bonus']}")
+                                        
+                                        st.markdown("**的中サマリー:**")
+                                        summary = analysis['summary']
+                                        st.write(f"本数字的中: {summary['main_numbers_predicted']}/6個")
+                                        st.write(f"ボーナス数字的中: {'○' if summary['bonus_predicted'] else '×'}")
+                                    
+                                    with col2:
+                                        st.markdown("**予想チケット成績:**")
+                                        ticket_analysis = analysis['ticket_analysis']
+                                        
+                                        prize_counts = {}
+                                        for ticket in ticket_analysis:
+                                            rank = ticket['prize_rank']
+                                            if rank:
+                                                prize_counts[rank] = prize_counts.get(rank, 0) + 1
+                                        
+                                        if prize_counts:
+                                            for rank in sorted(prize_counts.keys()):
+                                                st.write(f"{rank}等: {prize_counts[rank]}口")
+                                        else:
+                                            st.write("当選なし")
+                                        
+                                        # 最も成績の良いチケットを表示
+                                        best_ticket = min(ticket_analysis, key=lambda x: x['prize_rank'] if x['prize_rank'] else 10)
+                                        if best_ticket['prize_rank']:
+                                            st.markdown("**最高成績チケット:**")
+                                            st.write(f"番号: {best_ticket['numbers']}")
+                                            st.write(f"等級: {best_ticket['prize_rank']}等")
+                                            st.write(f"的中本数字: {best_ticket['matched_main_numbers']}")
+                        else:
+                            st.info("詳細分析データがありません。次回のバックテストから詳細情報が記録されます。")
                     
                     if detailed_log:
                         st.success("🔍 詳細ログが記録されました。戦略一覧タブから詳細を確認できます。")
@@ -580,7 +648,7 @@ def _show_continuous_learning(data_manager: DataManager):
                     continue_start = st.number_input(
                         "継続学習開始回",
                         min_value=original_end + 1,
-                        max_value=2000,
+                        max_value=2008,
                         value=original_end + 1,
                         help=f"元の戦略は第{original_end}回まで学習済みです。それ以降のデータで追加学習を行います。"
                     )
@@ -597,8 +665,8 @@ def _show_continuous_learning(data_manager: DataManager):
                     continue_end = st.number_input(
                         "継続学習終了回",
                         min_value=continue_start + 10,
-                        max_value=2000,
-                        value=min(continue_start + 200, 2000),
+                        max_value=2008,
+                        value=min(continue_start + 50, 2008),  # デフォルトを50回に短縮
                         help="継続学習の終了回号"
                     )
                     
@@ -687,6 +755,15 @@ def _show_continuous_learning(data_manager: DataManager):
                                 return
                             
                             base_model = strategy_info['model']
+                            
+                            # 進行状況表示用のプレースホルダー
+                            progress_bar = st.progress(0)
+                            progress_text = st.empty()
+                            
+                            def update_progress(progress, current_draw, total_draws):
+                                progress_bar.progress(progress)
+                                progress_text.text(f"継続学習進行状況: 第{current_draw}回 ({progress:.1%} 完了)")
+                            
                             model_type = strategy_info.get('model_type', 'xgboost')
                             
                             logger.info(f"継続学習: 元の戦略={selected_strategy}, モデルタイプ={model_type}")
@@ -705,7 +782,8 @@ def _show_continuous_learning(data_manager: DataManager):
                                     purchase_count=int(purchase_count),
                                     detailed_log=detailed_log,
                                     enable_feedback=enable_feedback,
-                                    learning_rate_factor=learning_rate_factor
+                                    learning_rate_factor=learning_rate_factor,
+                                    progress_callback=update_progress
                                 )
                             except Exception as e:
                                 st.error(f"継続学習の実行中にエラーが発生しました: {e}")
@@ -722,6 +800,10 @@ def _show_continuous_learning(data_manager: DataManager):
                             if not performance_log:
                                 st.error("継続学習の結果が空です。パラメータを確認してください。")
                                 return
+                            
+                            # プログレスバーとテキストをクリア
+                            progress_bar.empty()
+                            progress_text.empty()
                             
                             # 結果の集計
                             total_profit = sum(log['profit'] for log in performance_log)
