@@ -175,12 +175,27 @@ class DataManager:
             raise ValueError(f"本数字の列が6つ見つかりません。見つかった列: {main_number_cols}")
         
         # データ型の変換と検証
+        # 重要：「第何回」列を数値型に変換（型比較エラー防止）
+        validated_df['第何回'] = pd.to_numeric(validated_df['第何回'], errors='coerce')
+        
+        # 本数字列の型変換
         for col in main_number_cols:
             validated_df[col] = pd.to_numeric(validated_df[col], errors='coerce')
             # 範囲チェック（1-43）
             invalid_count = len(validated_df[(validated_df[col] < 1) | (validated_df[col] > 43) | validated_df[col].isna()])
             if invalid_count > 0:
                 logger.warning(f"{col} に無効な値が {invalid_count} 件見つかりました")
+        
+        # ボーナス数字も数値型に変換
+        bonus_cols = ['ボーナス数字', 'ボーナス', 'bonus']
+        for bonus_col in bonus_cols:
+            if bonus_col in validated_df.columns:
+                validated_df[bonus_col] = pd.to_numeric(validated_df[bonus_col], errors='coerce')
+                break
+        
+        # 本数字合計も数値型に変換
+        if '本数字合計' in validated_df.columns:
+            validated_df['本数字合計'] = pd.to_numeric(validated_df['本数字合計'], errors='coerce')
         
         # 重複回号のチェック（統一後の列名「第何回」を使用）
         if validated_df['第何回'].duplicated().any():

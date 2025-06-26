@@ -323,12 +323,29 @@ odds_b = 17.5
    - **対処法**: ✅ **修正済み** - 正しく43次元として処理するよう修正
    - **影響**: 継続学習がエラーなく実行されます
 
-8. **ログデータ型エラー** ✅
+9. **ログデータ型エラー** ✅
    - **症状**: `'list' object has no attribute 'get'`
    - **原因**: バックテストログの辞書型・リスト型の混在でアクセス方法が不適切
    - **対処法**: ✅ **修正済み** - 型安全なデータアクセス関数を実装
    - **修正箇所**: 戦略管理・詳細結果表示・予測分析の全関数
    - **影響**: 戦略管理画面・継続学習機能が安定動作します
+
+10. **型安全性・データ整合性エラー** ✅
+    - **症状**: `IndexError: single positional indexer is out-of-bounds`, `'<' not supported between instances of 'str' and 'int'`, `KeyError`, `AttributeError`
+    - **原因**: 
+      - `.iloc[0]` による境界チェック不足
+      - 文字列と数値の型混在による比較エラー
+      - 辞書・リストの混在によるアクセスエラー
+      - データ型変換の不徹底
+    - **対処法**: ✅ **修正済み** - 全ファイルで型安全性を徹底強化
+      - **data_manager.py**: 「第何回」「本数字」「ボーナス数字」の確実な数値型変換
+      - **feature_engine.py**: 回号列の型変換とリネーム処理の堅牢化
+      - **strategy_management.py**: 戦略データ取得の境界チェック
+      - **detailed_results.py**: ヒートマップ・データアクセスの安全化
+      - **backtester.py**: セット球・当選番号取得の型安全化
+      - **prediction.py**: 辞書アクセスの型チェック強化
+      - **dashboard.py**: 統計計算の型安全化
+    - **影響**: 全機能で型関連エラーが根本的に防止されます
 
 ### エンコーディング問題の詳細解決手順
 
@@ -420,6 +437,22 @@ Prometheus-L6は現在、**完全に動作する状態**です：
    - ランダム生成時の10通り制限も解除
    - フォールバック処理の5通り制限も解除
    - ボーナス数字取得の詳細ログ追加（デバッグ強化）
+   - ✅ **効果確認済み**: 新規戦略学習で正常に動作確認済み
+9. **新規戦略学習時のエラー修正**: 特徴量重要度表示の型安全化
+   - 文字列と数値の比較エラー（`'<' not supported between instances of 'str' and 'int'`）を解決
+   - 特徴量重要度データの型変換と検証を強化
+   - エラーハンドリングの詳細化とデバッグ情報の充実
+10. **🔧 徹底的な型安全化・データ整合性強化 (NEW!)**
+    - **strategy_management.py**: `.iloc[0]` によるIndexErrorを防止する型安全な戦略データ取得
+    - **detailed_results.py**: ヒートマップ生成とデータアクセスの境界チェック強化
+    - **backtester.py**: セット球情報取得と当選番号取得の型安全化、新規 `_get_actual_numbers_safe()` メソッド追加
+    - **prediction.py**: kelly_info・portfolio 辞書アクセスの型チェック追加
+    - **strategy.py/simulator.py**: strategy_performance 辞書の型検証強化
+    - **data_manager.py**: 「第何回」「本数字」「ボーナス数字」列の確実な数値型変換
+    - **feature_engine.py**: 回号列の型変換とリネーム処理の堅牢化
+    - **dashboard.py**: 統計計算（平均・最大値）の型安全な処理
+    - **simulation.py**: 戦略選択オプション作成時の型チェック
+    - **🎯 効果**: `'list' object has no attribute 'get'`、`'<' not supported between instances of 'str' and 'int'`、IndexError等の再発を根本防止
 
 ### 🚀 **即座に利用可能**
 ```bash

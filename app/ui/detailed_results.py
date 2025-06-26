@@ -491,10 +491,17 @@ def _show_prediction_analysis(performance_log: List[Dict]):
         st.markdown("#### 📊 的中率ヒートマップ")
         # 数字を7×7のグリッドに配置（43個なので最後の6個は空）
         heatmap_data = np.zeros((7, 7))
-        for i in range(43):
+        for i in range(min(43, len(df_analysis))):  # 境界チェック追加
             row = i // 7
             col = i % 7
-            heatmap_data[row, col] = df_analysis.iloc[i]['的中率_数値']
+            try:
+                if i < len(df_analysis) and '的中率_数値' in df_analysis.columns:
+                    heatmap_data[row, col] = df_analysis.iloc[i]['的中率_数値']
+                else:
+                    heatmap_data[row, col] = 0.0
+            except (IndexError, KeyError) as e:
+                logger.warning(f"ヒートマップデータ生成エラー (index {i}): {e}")
+                heatmap_data[row, col] = 0.0
         
         # 数字ラベルを作成
         labels = []
@@ -503,8 +510,17 @@ def _show_prediction_analysis(performance_log: List[Dict]):
             for j in range(7):
                 num = i * 7 + j + 1
                 if num <= 43:
-                    rate = df_analysis[df_analysis['数字'] == num]['的中率_数値'].iloc[0]
-                    row_labels.append(f"{num}<br>{rate:.1%}")
+                    # 型安全な的中率取得
+                    try:
+                        rate_data = df_analysis[df_analysis['数字'] == num]['的中率_数値']
+                        if not rate_data.empty:
+                            rate = rate_data.iloc[0]
+                            row_labels.append(f"{num}<br>{rate:.1%}")
+                        else:
+                            row_labels.append(f"{num}<br>--")
+                    except (IndexError, KeyError) as e:
+                        logger.warning(f"的中率取得エラー (数字 {num}): {e}")
+                        row_labels.append(f"{num}<br>--")
                 else:
                     row_labels.append("")
             labels.append(row_labels)

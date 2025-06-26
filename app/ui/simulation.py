@@ -82,11 +82,23 @@ def _show_single_strategy_simulation(data_manager: DataManager, strategies_df: p
     </h3>
     ''', unsafe_allow_html=True)
     
-    # 戦略選択
+    # 戦略選択（型安全）
     strategy_options = {}
     for _, row in strategies_df.iterrows():
-        display_name = f"{row['strategy_name']} (損益: {row['backtest_profit']:.0f}円)"
-        strategy_options[display_name] = row['strategy_id']
+        try:
+            strategy_name = row.get('strategy_name', 'Unknown')
+            profit = row.get('backtest_profit', 0)
+            strategy_id = row.get('strategy_id', '')
+            
+            # 型チェック
+            if not isinstance(profit, (int, float)):
+                profit = 0
+            
+            display_name = f"{strategy_name} (損益: {profit:.0f}円)"
+            strategy_options[display_name] = strategy_id
+        except Exception as e:
+            logger.warning(f"戦略選択肢作成でエラー: {e}")
+            continue
     
     selected_strategy_display = st.selectbox(
         "シミュレーションする戦略を選択",

@@ -36,8 +36,16 @@ def _show_backtest_details(data_manager: DataManager, strategy_name: str):
                 st.error(f"戦略「{strategy_name}」が見つかりません。戦略が削除されているか、名前に誤りがある可能性があります。")
                 return
             
-            # DataFrameの行を辞書に変換
-            strategy_info = strategy_row.iloc[0].to_dict()
+            # DataFrameの行を辞書に変換（型安全）
+            try:
+                if len(strategy_row) > 0:
+                    strategy_info = strategy_row.iloc[0].to_dict()
+                else:
+                    st.error(f"戦略「{strategy_name}」のデータが正常に取得できませんでした。")
+                    return
+            except (IndexError, AttributeError) as e:
+                st.error(f"戦略データの取得中にエラーが発生しました: {e}")
+                return
         
         # バックテストログの取得
         backtest_log = strategy_info.get('backtest_log', [])
@@ -188,7 +196,17 @@ def _show_strategy_list(data_manager: DataManager):
         selected_strategy = st.selectbox("詳細を表示する戦略を選択", strategy_names)
         
         if selected_strategy:
-            strategy_info = df_strategies[df_strategies['strategy_name'] == selected_strategy].iloc[0]
+            # 型安全な戦略情報取得
+            strategy_data = df_strategies[df_strategies['strategy_name'] == selected_strategy]
+            if strategy_data.empty:
+                st.error(f"戦略「{selected_strategy}」が見つかりません。")
+                return
+            
+            try:
+                strategy_info = strategy_data.iloc[0]
+            except (IndexError, AttributeError) as e:
+                st.error(f"戦略データの取得エラー: {e}")
+                return
             
             col1, col2 = st.columns(2)
             
@@ -483,14 +501,30 @@ def _show_new_strategy_training(data_manager: DataManager):
                                 
                                 if all_importances:
                                     df_imp = pd.DataFrame(all_importances)
-                                    # 特徴量ごとに重要度を平均化
-                                    avg_imp = df_imp.groupby('feature')['importance'].mean().sort_values(ascending=False)
                                     
-                                    st.info("バックテスト期間全体での特徴量の平均重要度（上位20）")
-                                    st.bar_chart(avg_imp.head(20))
-                                    
-                                    with st.expander("全ての特徴量の重要度を表示"):
-                                        st.dataframe(avg_imp)
+                                    # 数値型の確保と型安全な処理
+                                    if 'importance' in df_imp.columns and 'feature' in df_imp.columns:
+                                        # importanceを数値型に変換
+                                        df_imp['importance'] = pd.to_numeric(df_imp['importance'], errors='coerce')
+                                        # NaNを削除
+                                        df_imp = df_imp.dropna(subset=['importance'])
+                                        
+                                        if not df_imp.empty:
+                                            # 特徴量ごとに重要度を平均化（型安全）
+                                            avg_imp = df_imp.groupby('feature')['importance'].mean().sort_values(ascending=False)
+                                            
+                                            if not avg_imp.empty:
+                                                st.info("バックテスト期間全体での特徴量の平均重要度（上位20）")
+                                                st.bar_chart(avg_imp.head(20))
+                                                
+                                                with st.expander("全ての特徴量の重要度を表示"):
+                                                    st.dataframe(avg_imp)
+                                            else:
+                                                st.warning("有効な特徴量重要度データがありません。")
+                                        else:
+                                            st.warning("特徴量重要度データの変換に失敗しました。")
+                                    else:
+                                        st.warning("特徴量重要度データの形式が正しくありません。")
                                 else:
                                     st.warning("特徴量の重要度データが見つかりませんでした。")
 
@@ -499,11 +533,12 @@ def _show_new_strategy_training(data_manager: DataManager):
                     
                 except Exception as e:
                     st.error(f"戦略学習中にエラーが発生しました: {e}")
-                    logger.error(f"Strategy training error: {e}")
+                    logger.error(f"Strategy training error: {e}", exc_info=True)
                     
                     # デバッグ情報
                     if st.checkbox("デバッグ情報を表示"):
                         st.code(f"エラー詳細: {str(e)}")
+                        st.code(f"エラー型: {type(e).__name__}")
 
 def _show_continuous_learning(data_manager: DataManager):
     """
@@ -549,7 +584,17 @@ def _show_continuous_learning(data_manager: DataManager):
             )
             
             if selected_strategy:
-                strategy_info = df_strategies[df_strategies['strategy_name'] == selected_strategy].iloc[0]
+                # 型安全な戦略情報取得
+                strategy_data = df_strategies[df_strategies['strategy_name'] == selected_strategy]
+                if strategy_data.empty:
+                    st.error(f"戦略「{selected_strategy}」が見つかりません。")
+                    return
+                
+                try:
+                    strategy_info = strategy_data.iloc[0]
+                except (IndexError, AttributeError) as e:
+                    st.error(f"戦略データの取得エラー: {e}")
+                    return
                 
                 # 現在の戦略情報を表示
                 col1, col2, col3 = st.columns(3)

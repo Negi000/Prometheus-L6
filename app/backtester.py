@@ -242,7 +242,7 @@ class Backtester:
                     # 計算した誤差を現在の回の行に保存 -> 次の回の学習で使われる
                     df_run.loc[actual_mask, self.error_cols] = error
                 
-                actual_numbers = self._get_actual_numbers(actual_data.iloc[0])
+                actual_numbers = self._get_actual_numbers_safe(actual_data)
                 
                 winnings, hits_detail = self._calculate_winnings(
                     predicted_portfolio, actual_numbers
@@ -438,8 +438,19 @@ class Backtester:
                         # 43次元を超える場合は切り捨て
                         raw_probabilities = raw_probabilities[:43]
                 
-                # セット球情報を取得
-                set_ball = current_data.iloc[0].get('セット球', 'A')
+                # セット球情報を型安全に取得
+                try:
+                    if len(current_data) > 0:
+                        current_row = current_data.iloc[0]
+                        if hasattr(current_row, 'get'):
+                            set_ball = current_row.get('セット球', 'A')
+                        else:
+                            set_ball = current_row.get('セット球') if 'セット球' in current_row.index else 'A'
+                    else:
+                        set_ball = 'A'
+                except (IndexError, AttributeError, KeyError) as e:
+                    logger.warning(f"セット球情報取得エラー: {e}")
+                    set_ball = 'A'
                 
                 # 補正適用（本数字のみ、43次元）
                 corrected_probabilities = self.pattern_correction.apply_corrections(
@@ -631,7 +642,7 @@ class Backtester:
                     error = actual_results - predicted_probabilities
                     df_run.loc[test_mask, self.error_cols] = error
                 
-                actual_numbers = self._get_actual_numbers(actual_data.iloc[0])
+                actual_numbers = self._get_actual_numbers_safe(actual_data)
                 
                 try:
                     winnings, hits_detail = self._calculate_winnings(
@@ -1010,6 +1021,36 @@ class Backtester:
         
         except Exception as e:
             logger.error(f"当選番号の取得中にエラー: {e}")
+            return {'main': [], 'bonus': None}
+
+    def _get_actual_numbers_safe(self, data: pd.DataFrame) -> Dict[str, List[int]]:
+        """
+        実際の当選番号を型安全に取得
+        
+        Args:
+            data (pd.DataFrame): 当選データ
+            
+        Returns:
+            Dict[str, List[int]]: 当選番号の辞書 {'main': [数字...], 'bonus': 数字}
+        """
+        try:
+            if data.empty:
+                logger.warning("当選データが空です")
+                return {'main': [], 'bonus': None}
+            
+            if len(data) == 0:
+                logger.warning("当選データの行数が0です")
+                return {'main': [], 'bonus': None}
+            
+            # 最初の行を安全に取得
+            row = data.iloc[0]
+            return self._get_actual_numbers(row)
+            
+        except (IndexError, AttributeError, KeyError) as e:
+            logger.error(f"型安全な当選番号取得でエラー: {e}")
+            return {'main': [], 'bonus': None}
+        except Exception as e:
+            logger.error(f"予期しないエラー（当選番号取得）: {e}")
             return {'main': [], 'bonus': None}
 
     def _calculate_winnings(self, portfolio: List[Tuple[int, ...]], 

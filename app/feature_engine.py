@@ -25,8 +25,8 @@ class FeatureEngine:
         self.df = history_df.copy()
 
         # 関連列を数値型に変換（エラーはNaNにする）
-        num_cols = [col for col in self.df.columns if '本数字' in col or 'ボーナス数字' in col]
-        # '第何回'も数値型に
+        num_cols = [col for col in self.df.columns if '本数字' in col or 'ボーナス数字' in col or 'ボーナス' in col]
+        # '第何回'も数値型に（最優先）
         if '第何回' in self.df.columns:
             num_cols.append('第何回')
         elif '回' in self.df.columns:
@@ -48,9 +48,14 @@ class FeatureEngine:
             
             if round_col:
                 self.df.rename(columns={round_col: '第何回'}, inplace=True)
-                logger.info(f"特徴量エンジンで列名を '{round_col}' から '第何回' に変更しました")
+                # リネーム後に型変換を確実に実行
+                self.df['第何回'] = pd.to_numeric(self.df['第何回'], errors='coerce')
+                logger.info(f"特徴量エンジンで列名を '{round_col}' から '第何回' に変更し、数値型に変換しました")
             else:
                 raise ValueError(f"回号列が見つかりません。利用可能な列: {list(self.df.columns)}")
+        else:
+            # 「第何回」列が既に存在する場合も型変換を確実に実行
+            self.df['第何回'] = pd.to_numeric(self.df['第何回'], errors='coerce')
 
         # データフレームを最適化
         self.df = self.df.copy()  # 断片化解除

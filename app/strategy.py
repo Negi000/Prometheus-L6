@@ -303,8 +303,16 @@ class Strategy:
         Returns:
             Dict: ケリー基準による推奨投資情報
         """
-        # パフォーマンス指標の取得
-        win_rate_p = strategy_performance.get('hit_rate_4', 0.0)  # 4等以上の勝率
+        # パフォーマンス指標の型安全な取得
+        if not isinstance(strategy_performance, dict):
+            logger.warning(f"strategy_performance が辞書型ではありません: {type(strategy_performance)}")
+            win_rate_p = 0.0
+        else:
+            win_rate_p = strategy_performance.get('hit_rate_4', 0.0)  # 4等以上の勝率
+            # 値の型チェック
+            if not isinstance(win_rate_p, (int, float)):
+                logger.warning(f"hit_rate_4 が数値型ではありません: {type(win_rate_p)}, デフォルト値使用")
+                win_rate_p = 0.0
         
         # 設定からオッズを取得
         average_prize = float(self.config['KellyCriterion']['average_win_prize'])

@@ -127,9 +127,22 @@ class Simulator:
         """
         戦略のパフォーマンスに基づいて調整された当選確率を計算
         """
-        # バックテストの的中率を基準とした調整
-        base_hit_rate_4 = strategy_performance.get('hit_rate_4', 0.0)
-        base_hit_rate_3 = strategy_performance.get('hit_rate_3', 0.0)
+        # バックテストの的中率を型安全に取得
+        if not isinstance(strategy_performance, dict):
+            logger.warning(f"strategy_performance が辞書型ではありません: {type(strategy_performance)}")
+            base_hit_rate_4 = 0.0
+            base_hit_rate_3 = 0.0
+        else:
+            base_hit_rate_4 = strategy_performance.get('hit_rate_4', 0.0)
+            base_hit_rate_3 = strategy_performance.get('hit_rate_3', 0.0)
+            
+            # 値の型チェック
+            if not isinstance(base_hit_rate_4, (int, float)):
+                logger.warning(f"hit_rate_4 が数値型ではありません: {type(base_hit_rate_4)}")
+                base_hit_rate_4 = 0.0
+            if not isinstance(base_hit_rate_3, (int, float)):
+                logger.warning(f"hit_rate_3 が数値型ではありません: {type(base_hit_rate_3)}")
+                base_hit_rate_3 = 0.0
         
         # 理論確率に対する戦略の改善率
         theoretical_hit_rate_4 = (self.theoretical_probabilities[4] + 

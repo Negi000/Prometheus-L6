@@ -67,13 +67,31 @@ def show_dashboard(df_history: pd.DataFrame, df_features: pd.DataFrame = None):
     
     with col2:
         if '本数字合計' in df_history.columns:
-            avg_sum = df_history['本数字合計'].mean()
-            st.metric("平均合計値", f"{avg_sum:.1f}")
+            try:
+                # 型安全な平均計算
+                sum_data = pd.to_numeric(df_history['本数字合計'], errors='coerce')
+                avg_sum = sum_data.mean()
+                if pd.notna(avg_sum):
+                    st.metric("平均合計値", f"{avg_sum:.1f}")
+                else:
+                    st.metric("平均合計値", "N/A")
+            except Exception as e:
+                logger.warning(f"平均合計値計算エラー: {e}")
+                st.metric("平均合計値", "N/A")
     
     with col3:
         if '第何回' in df_history.columns:
-            latest_round = df_history['第何回'].max()
-            st.metric("最新回数", f"第{latest_round}回")
+            try:
+                # 型安全な最大回数取得
+                round_data = pd.to_numeric(df_history['第何回'], errors='coerce')
+                latest_round = round_data.max()
+                if pd.notna(latest_round):
+                    st.metric("最新回数", f"第{int(latest_round)}回")
+                else:
+                    st.metric("最新回数", "N/A")
+            except Exception as e:
+                logger.warning(f"最新回数取得エラー: {e}")
+                st.metric("最新回数", "N/A")
     
     with col4:
         # 最新の抽選日

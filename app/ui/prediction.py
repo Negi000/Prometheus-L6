@@ -280,17 +280,20 @@ def _display_results(portfolio: dict, probabilities: np.ndarray,
     st.success("ポートフォリオの生成が完了しました！")
     
     # ケリー基準の結果表示
-    if kelly_info:
+    if kelly_info and isinstance(kelly_info, dict):
         st.subheader("💰 ケリー基準による推奨投資")
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("推奨投資額", f"{kelly_info['recommended_investment']:,.0f}円")
+            investment = kelly_info.get('recommended_investment', 0)
+            st.metric("推奨投資額", f"{investment:,.0f}円")
         with col2:
-            st.metric("推奨口数", f"{kelly_info['recommended_tickets']}口")
+            tickets = kelly_info.get('recommended_tickets', 0)
+            st.metric("推奨口数", f"{tickets}口")
         with col3:
             risk_color = {"Low": "🟢", "Medium": "🟡", "High": "🔴"}
-            st.metric("リスクレベル", f"{risk_color.get(kelly_info['risk_level'], '🔴')} {kelly_info['risk_level']}")
+            risk_level = kelly_info.get('risk_level', 'Unknown')
+            st.metric("リスクレベル", f"{risk_color.get(risk_level, '🔴')} {risk_level}")
     
     # ポートフォリオの表示
     st.subheader("📊 生成されたポートフォリオ")
@@ -305,13 +308,13 @@ def _display_results(portfolio: dict, probabilities: np.ndarray,
     if conditions:
         st.info(f"適用条件: {' | '.join(conditions)}")
     
-    # コア戦略の表示
-    if 'core' in portfolio and portfolio['core']:
+    # コア戦略の表示（型安全）
+    if isinstance(portfolio, dict) and 'core' in portfolio and portfolio.get('core'):
         st.write("### 🎯 コア戦略 (メイン戦略)")
         _display_portfolio_table(portfolio['core'], probabilities, "core")
     
-    # サテライト戦略の表示
-    if 'satellite' in portfolio and portfolio['satellite']:
+    # サテライト戦略の表示（型安全）
+    if isinstance(portfolio, dict) and 'satellite' in portfolio and portfolio.get('satellite'):
         st.write("### 🛰️ サテライト戦略 (補完戦略)")
         _display_portfolio_table(portfolio['satellite'], probabilities, "satellite")
     
