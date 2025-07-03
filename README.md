@@ -347,6 +347,15 @@ odds_b = 17.5
       - **dashboard.py**: 統計計算の型安全化
     - **影響**: 全機能で型関連エラーが根本的に防止されます
 
+11. **文字列・数値混在ソートエラー** ✅ **(HOT FIX)**
+    - **症状**: `TypeError: '<' not supported between instances of 'str' and 'int'` in `sorted(hit_numbers)`
+    - **原因**: リスト内の文字列（ボーナス表記等）と数値が混在している状態でソート関数を実行
+    - **対処法**: ✅ **修正済み** - 型別分離ソート処理を実装
+      - **detailed_results.py**: 予想的中・本数字・チケット表示での型フィルタリング
+      - **backtester.py**: 当選番号・連続数字カウント・ギャップ計算の型安全処理
+      - **追加保護**: `isinstance()` + `pd.isna()` による厳格な型検証
+    - **影響**: 戦略学習実行時のソートエラーが完全に解決されます
+
 ### エンコーディング問題の詳細解決手順
 
 **方法1: Excelを使用**
@@ -453,6 +462,12 @@ Prometheus-L6は現在、**完全に動作する状態**です：
     - **dashboard.py**: 統計計算（平均・最大値）の型安全な処理
     - **simulation.py**: 戦略選択オプション作成時の型チェック
     - **🎯 効果**: `'list' object has no attribute 'get'`、`'<' not supported between instances of 'str' and 'int'`、IndexError等の再発を根本防止
+11. **🛡️ 文字列・数値混在ソートエラーの根絶 (HOT FIX!)**
+    - **詳細表示エラー修正**: `sorted()` 関数での文字列・数値混在による比較エラーを完全解決
+    - **detailed_results.py**: 予想的中表示、本数字表示、チケット表示の型安全なソート処理
+    - **backtester.py**: 当選番号処理、連続数字カウント、ギャップ計算の型フィルタリング強化
+    - **追加保護**: `isinstance()` チェックと `pd.isna()` による型・null値検証
+    - **🎯 即効性**: 戦略学習実行時の `'<' not supported between instances of 'str' and 'int'` エラーを即座に解決
 
 ### 🚀 **即座に利用可能**
 ```bash

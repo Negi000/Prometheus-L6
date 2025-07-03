@@ -299,10 +299,17 @@ def _show_detailed_by_draw(performance_log: List[Dict]):
                     main_numbers = []
                     bonus_number = None
                 
-                # 本数字を視覚的に表示
+                # 本数字を視覚的に表示（型安全）
                 if main_numbers:
-                    main_str = "　".join([f"**{num:02d}**" for num in sorted(main_numbers)])
-                    st.markdown(f"**本数字:** {main_str}")
+                    try:
+                        # 数値のみをフィルタしてソート
+                        numeric_main = sorted([num for num in main_numbers if isinstance(num, (int, float)) and not pd.isna(num)])
+                        if numeric_main:
+                            main_str = "　".join([f"**{int(num):02d}**" for num in numeric_main])
+                            st.markdown(f"**本数字:** {main_str}")
+                    except Exception as e:
+                        logger.warning(f"本数字表示エラー: {e}")
+                        st.warning("本数字データの表示中にエラーが発生しました")
                 
                 if bonus_number:
                     st.markdown(f"**ボーナス数字:** **{bonus_number:02d}**")
@@ -379,14 +386,23 @@ def _show_detailed_by_draw(performance_log: List[Dict]):
                                 ticket_hits.append("5等")
                                 ticket_profit += 1000
                         
-                        # チケット表示
-                        ticket_str = "　".join([f"{num:02d}" for num in sorted(ticket)])
-                        hit_status = " ".join(ticket_hits) if ticket_hits else ""
-                        
-                        if ticket_hits:
-                            st.success(f"**チケット{j+1}:** {ticket_str} → {hit_status}")
-                        else:
-                            st.info(f"**チケット{j+1}:** {ticket_str}")
+                        # チケット表示（型安全）
+                        try:
+                            # 数値のみをフィルタしてソート
+                            numeric_ticket = sorted([num for num in ticket if isinstance(num, (int, float)) and not pd.isna(num)])
+                            if numeric_ticket:
+                                ticket_str = "　".join([f"{int(num):02d}" for num in numeric_ticket])
+                                hit_status = " ".join(ticket_hits) if ticket_hits else ""
+                                
+                                if ticket_hits:
+                                    st.success(f"**チケット{j+1}:** {ticket_str} → {hit_status}")
+                                else:
+                                    st.info(f"**チケット{j+1}:** {ticket_str}")
+                            else:
+                                st.warning(f"**チケット{j+1}:** データエラー")
+                        except Exception as e:
+                            logger.warning(f"チケット表示エラー: {e}")
+                            st.warning(f"**チケット{j+1}:** 表示エラー")
                 
                 # 的中数字のハイライト
                 if main_numbers and portfolio:
@@ -400,12 +416,23 @@ def _show_detailed_by_draw(performance_log: List[Dict]):
                         hit_numbers.add(f"{bonus_number}(B)")
                     
                     if hit_numbers:
-                        hit_str = "　".join([f"**{num}**" for num in sorted(hit_numbers) if isinstance(num, int)])
-                        if bonus_number and bonus_number in all_predicted:
-                            hit_str += f"　**{bonus_number}(B)**"
-                        st.markdown(f"予想的中: {hit_str}")
-                    else:
-                        st.info("予想数字の的中なし")
+                        # 型安全なソート処理（数値のみソート、文字列は別処理）
+                        numeric_hits = sorted([num for num in hit_numbers if isinstance(num, int)])
+                        string_hits = [num for num in hit_numbers if isinstance(num, str)]
+                        
+                        hit_parts = []
+                        # 数値的中を追加
+                        if numeric_hits:
+                            hit_parts.extend([f"**{num}**" for num in numeric_hits])
+                        # 文字列的中（ボーナス等）を追加
+                        if string_hits:
+                            hit_parts.extend([f"**{num}**" for num in string_hits])
+                        
+                        if hit_parts:
+                            hit_str = "　".join(hit_parts)
+                            st.markdown(f"予想的中: {hit_str}")
+                        else:
+                            st.info("予想数字の的中なし")
 
 def _show_prediction_analysis(performance_log: List[Dict]):
     """予想vs実際の分析表示"""

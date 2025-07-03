@@ -1017,7 +1017,9 @@ class Backtester:
             if bonus_number is None:
                 logger.warning(f"ボーナス数字が取得できませんでした。利用可能な列: {list(row.index)}")
             
-            return {'main': sorted(main_numbers), 'bonus': bonus_number}
+            # 型安全なソート（数値のみ）
+            safe_main_numbers = sorted([num for num in main_numbers if isinstance(num, (int, float)) and not pd.isna(num)])
+            return {'main': safe_main_numbers, 'bonus': bonus_number}
         
         except Exception as e:
             logger.error(f"当選番号の取得中にエラー: {e}")
@@ -1615,20 +1617,22 @@ class PatternCorrection:
         return {set_ball: 0.0}  # 実装では、より詳細な分析を行う
     
     def _count_consecutive(self, numbers: List[int]) -> int:
-        """連続数字のペア数をカウント"""
-        sorted_nums = sorted(numbers)
+        """連続数字のペア数をカウント（型安全）"""
+        # 数値のみをフィルタしてソート
+        safe_nums = sorted([num for num in numbers if isinstance(num, (int, float)) and not pd.isna(num)])
         consecutive_count = 0
-        for i in range(len(sorted_nums) - 1):
-            if sorted_nums[i+1] - sorted_nums[i] == 1:
+        for i in range(len(safe_nums) - 1):
+            if safe_nums[i+1] - safe_nums[i] == 1:
                 consecutive_count += 1
         return consecutive_count
     
     def _calculate_gaps(self, numbers: List[int]) -> List[int]:
-        """数字間のギャップを計算"""
-        sorted_nums = sorted(numbers)
+        """数字間のギャップを計算（型安全）"""
+        # 数値のみをフィルタしてソート
+        safe_nums = sorted([num for num in numbers if isinstance(num, (int, float)) and not pd.isna(num)])
         gaps = []
-        for i in range(len(sorted_nums) - 1):
-            gaps.append(sorted_nums[i+1] - sorted_nums[i])
+        for i in range(len(safe_nums) - 1):
+            gaps.append(int(safe_nums[i+1] - safe_nums[i]))
         return gaps
     
     def get_correction_summary(self) -> Dict:
